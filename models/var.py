@@ -397,7 +397,7 @@ class SDVAR(nn.Module):
         self.patch_nums = self.draft_model.patch_nums
         self.num_stages_minus_1 = self.draft_model.num_stages_minus_1
         exit_points = [1,5,14,30,55,91,155,255,424,680]
-        pindex = exit_points[entry_num]
+
 
         device = torch.device("cuda:0")
         attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
@@ -512,7 +512,7 @@ class SDVAR(nn.Module):
         
     
         ###### target模型接受draft模型生成的内容然后生成最后一层的内容
-
+        pindex = exit_points[entry_num]
 
         self.target_model.rng = self.draft_model.rng
         target_label_B = draft_label_B
