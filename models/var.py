@@ -396,6 +396,12 @@ class SDVAR(nn.Module):
         assert self.draft_model.num_stages_minus_1 == self.target_model.num_stages_minus_1
         self.patch_nums = self.draft_model.patch_nums
         self.num_stages_minus_1 = self.draft_model.num_stages_minus_1
+        exit_points = [1,5,14,30,55,91,155,255,424,680]
+        pindex = exit_points[entry_num]
+
+        device = torch.device("cuda:0")
+        attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
+        attn_bias = attn_bias.to(device)
 
         total_stages = len(self.patch_nums)
 
@@ -445,6 +451,7 @@ class SDVAR(nn.Module):
 
         for si, pn in enumerate(self.patch_nums):
             
+            # 生成0-entry_num-1
             if si >= entry_num:
                 break
 
@@ -505,12 +512,7 @@ class SDVAR(nn.Module):
         
     
         ###### target模型接受draft模型生成的内容然后生成最后一层的内容
-        exit_points = [1,5,14,30,55,91,155,255,424,680]
-        pindex = exit_points[entry_num]
 
-        device = torch.device("cuda:0")
-        attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
-        attn_bias = attn_bias.to(device)
 
         self.target_model.rng = self.draft_model.rng
         target_label_B = draft_label_B
@@ -532,11 +534,10 @@ class SDVAR(nn.Module):
         target_cur_L = 0
         target_f_hat = draft_f_hat
 
-
         target_cond_BD_or_gss = self.target_model.shared_ada_lin(target_cond_BD)
 
         assert torch.equal(target_cond_BD_or_gss, draft_cond_BD_or_gss)
-        # 如何draft_token_hub不为0
+        # 如果draft_token_hub不为0
         if not len(draft_token_hub) == 0:
             # 接受之前生成的做为target_model输出的prefix
             target_next_token_map = draft_token_hub    
@@ -548,7 +549,7 @@ class SDVAR(nn.Module):
             if len(target_next_token_map) != 0:
                 target_next_token_map = torch.cat([target_first_token_map,target_next_token_map],dim=1)
             else:
-                target_next_token_map = torch.cat([target_first_token_map],dim=1)
+                target_next_token_map = target_first_token_map
             
 
         else: 
