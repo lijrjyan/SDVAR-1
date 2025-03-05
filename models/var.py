@@ -459,7 +459,7 @@ class SDVAR(nn.Module):
             draft_logits_BlV = self.draft_model.get_logits(x, draft_cond_BD)            
             
             t = cfg * ratio
-            print(f"draft:{target_logits_BlV.shape}")
+            print(f"draft:{draft_logits_BlV.shape}")
             draft_logits_BlV = (1+t)*draft_logits_BlV[:B] - t*draft_logits_BlV[B:]  # (B, l, V)
 
             draft_idx_Bl = sample_with_top_k_top_p_(
