@@ -556,6 +556,8 @@ class SDVAR(nn.Module):
             target_f_hat = target_sos.new_zeros(B, self.target_model.Cvae,
                                           self.target_model.patch_nums[-1],
                                           self.target_model.patch_nums[-1])       
+        
+        print(target_next_token_map.shape)
 
         for blk in self.target_model.blocks:
             blk.attn.kv_caching(True)
