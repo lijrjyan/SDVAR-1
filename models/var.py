@@ -459,7 +459,7 @@ class SDVAR(nn.Module):
             draft_logits_BlV = self.draft_model.get_logits(x, draft_cond_BD)            
             
             t = cfg * ratio
-            print(f"draft:{draft_logits_BlV.shape}")
+            # print(f"draft:{draft_logits_BlV.shape}")
             draft_logits_BlV = (1+t)*draft_logits_BlV[:B] - t*draft_logits_BlV[B:]  # (B, l, V)
 
             draft_idx_Bl = sample_with_top_k_top_p_(
@@ -497,7 +497,7 @@ class SDVAR(nn.Module):
             if si == self.num_stages_minus_1:
                 for blk in self.draft_model.blocks:
                     blk.attn.kv_caching(False)
-                print("done")
+                # print("done")
                 return self.draft_model.vae_proxy[0].fhat_to_img(draft_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
 
         # draft模型生成完毕  
@@ -586,7 +586,7 @@ class SDVAR(nn.Module):
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
 
                 if si == entry_num:
-                    x = target_next_token_map[::pindex]
+                    x = target_next_token_map[:,sindex:pindex]
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
                 else:
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
@@ -604,7 +604,7 @@ class SDVAR(nn.Module):
 
             # 这里进行了改动，我们没有进行重新采样，因为实际上我们应该继续使用之前的f_hat,
 
-            print(f"target:{target_logits_BlV.shape}")
+            # print(f"target:{target_logits_BlV.shape}")
 
             target_logits_BlV = (1+t) * target_logits_BlV[:B] - t * target_logits_BlV[B:]
             target_idx_Bl = sample_with_top_k_top_p_(
@@ -646,7 +646,7 @@ class SDVAR(nn.Module):
         return self.target_model.vae_proxy[0].fhat_to_img(target_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
 
     @torch.no_grad()
-    def sdvar_autoregressive_infer_cfg_sd_test1(
+    def sdvar_autoregressive_infer_cfg_sd_test2(
         self,
         B: int,
         label_B: Optional[Union[int, torch.LongTensor]],
@@ -741,7 +741,7 @@ class SDVAR(nn.Module):
             draft_logits_BlV = self.draft_model.get_logits(x, draft_cond_BD)            
             
             t = cfg * ratio
-            print(f"draft:{draft_logits_BlV.shape}")
+            # print(f"draft:{draft_logits_BlV.shape}")
             draft_logits_BlV = (1+t)*draft_logits_BlV[:B] - t*draft_logits_BlV[B:]  # (B, l, V)
 
             draft_idx_Bl = sample_with_top_k_top_p_(
@@ -779,7 +779,7 @@ class SDVAR(nn.Module):
             if si == self.num_stages_minus_1:
                 for blk in self.draft_model.blocks:
                     blk.attn.kv_caching(False)
-                print("done")
+                # print("done")
                 return self.draft_model.vae_proxy[0].fhat_to_img(draft_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
 
         # draft模型生成完毕  
@@ -868,7 +868,7 @@ class SDVAR(nn.Module):
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
 
                 if si == entry_num:
-                    x = target_next_token_map[::pindex]
+                    x = target_next_token_map[:,sindex:pindex]
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
                 else:
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
@@ -886,7 +886,7 @@ class SDVAR(nn.Module):
 
             # 这里进行了改动，我们没有进行重新采样，因为实际上我们应该继续使用之前的f_hat,
 
-            print(f"target:{target_logits_BlV.shape}")
+            # print(f"target:{target_logits_BlV.shape}")
 
             target_logits_BlV = (1+t) * target_logits_BlV[:B] - t * target_logits_BlV[B:]
             target_idx_Bl = sample_with_top_k_top_p_(
