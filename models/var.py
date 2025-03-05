@@ -1604,7 +1604,7 @@ class SDVAR(nn.Module):
 
         assert(target_first_token_map, draft_first_token_map)
         target_cur_L = 0
-        target_f_hat =  draft_f_hat
+        target_f_hat = draft_f_hat
 
 
         target_cond_BD_or_gss = self.target_model.shared_ada_lin(target_cond_BD)
@@ -1624,12 +1624,12 @@ class SDVAR(nn.Module):
                 target_next_token_map = torch.cat([target_first_token_map],dim=1)
             
 
-            target_f_hat = target_sos.new_zeros(B, self.target_model.Cvae,
-                                          self.target_model.patch_nums[-1],
-                                          self.target_model.patch_nums[-1])
         else: 
             target_next_token_map = target_first_token_map
-        
+            target_f_hat = target_sos.new_zeros(B, self.target_model.Cvae,
+                                          self.target_model.patch_nums[-1],
+                                          self.target_model.patch_nums[-1])       
+
         for blk in self.target_model.blocks:
             blk.attn.kv_caching(True)
 
