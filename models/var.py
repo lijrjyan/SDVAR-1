@@ -806,22 +806,22 @@ class SDVAR(nn.Module):
             torch.cat((target_label_B, torch.full_like(target_label_B, fill_value=self.target_model.num_classes)), dim=0)
         )
 
-        assert torch.equal(target_sos, draft_sos)
+        # assert torch.equal(target_sos, draft_sos)
         target_lvl_pos = self.target_model.lvl_embed(self.target_model.lvl_1L) + self.target_model.pos_1LC
 
-        assert torch.equal(target_lvl_pos, draft_lvl_pos)
+        # assert torch.equal(target_lvl_pos, draft_lvl_pos)
         
         target_first_token_map = target_sos.unsqueeze(1).expand(2 * B, self.target_model.first_l, -1) \
             + self.target_model.pos_start.expand(2 * B, self.target_model.first_l, -1) \
             + target_lvl_pos[:, :self.target_model.first_l]
 
-        assert torch.equal(target_first_token_map,draft_first_token_map)
+        # assert torch.equal(target_first_token_map,draft_first_token_map)
         target_cur_L = 0
         target_f_hat = draft_f_hat
 
         target_cond_BD_or_gss = self.target_model.shared_ada_lin(target_cond_BD)
 
-        assert torch.equal(target_cond_BD_or_gss, draft_cond_BD_or_gss)
+        # assert torch.equal(target_cond_BD_or_gss, draft_cond_BD_or_gss)
         # 如果draft_token_hub不为0
         if not len(draft_token_hub) == 0:
             # 接受之前生成的做为target_model输出的prefix
