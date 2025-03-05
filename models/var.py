@@ -602,7 +602,7 @@ class SDVAR(nn.Module):
 
             # 这里进行了改动，我们没有进行重新采样，因为实际上我们应该继续使用之前的f_hat,
 
-            print(target_logits_BlV)
+            print(target_logits_BlV.shape)
 
             target_logits_BlV = (1+t) * target_logits_BlV[:B] - t * target_logits_BlV[B:]
             target_idx_Bl = sample_with_top_k_top_p_(
