@@ -588,10 +588,10 @@ class SDVAR(nn.Module):
                         x = target_next_token_map[:,exit_points[entry_num-1]:pindex]
                     else:
                         x = target_next_token_map[:,0:pindex]
+                    print(x.shape)
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
                 else:
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
-                
             # sd_mask = 0, 不需要使用掩码
             else:
                 if si == entry_num:
