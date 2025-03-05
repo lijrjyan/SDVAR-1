@@ -558,8 +558,6 @@ class SDVAR(nn.Module):
                                           self.target_model.patch_nums[-1],
                                           self.target_model.patch_nums[-1])       
         
-        print(target_next_token_map.shape)
-
         for blk in self.target_model.blocks:
             blk.attn.kv_caching(True)
 
@@ -589,9 +587,7 @@ class SDVAR(nn.Module):
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
                 else:
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
-                    
-
-
+                
             # sd_mask = 0, 不需要使用掩码
             else:
                 if si == entry_num:
@@ -605,6 +601,8 @@ class SDVAR(nn.Module):
                 target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
 
             # 这里进行了改动，我们没有进行重新采样，因为实际上我们应该继续使用之前的f_hat,
+
+            print(target_logits_BlV)
 
             target_logits_BlV = (1+t) * target_logits_BlV[:B] - t * target_logits_BlV[B:]
             target_idx_Bl = sample_with_top_k_top_p_(
