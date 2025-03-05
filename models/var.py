@@ -530,7 +530,6 @@ class SDVAR(nn.Module):
             + self.target_model.pos_start.expand(2 * B, self.target_model.first_l, -1) \
             + target_lvl_pos[:, :self.target_model.first_l]
 
-        assert(target_first_token_map, draft_first_token_map)
         target_cur_L = 0
         target_f_hat = draft_f_hat
 
@@ -588,15 +587,16 @@ class SDVAR(nn.Module):
                 else:
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
                     
-                if si == entry_num:
-                    x = target_next_token_map[:, exit_points[entry_num-1]:pindex]
-                else:
-                    x = target_next_token_map
-                AdaLNSelfAttn.forward
-                if si >= entry_num:
-                    for b in self.target_model.blocks:
-                        x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
-                target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
+                # if si == entry_num:
+                #     x = target_next_token_map[:, exit_points[entry_num-1]:pindex]
+                # else:
+                #     x = target_next_token_map
+                # AdaLNSelfAttn.forward
+                # if si >= entry_num:
+                #     for b in self.target_model.blocks:
+                #         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
+                # target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
+
             # sd_mask = 0, 不需要使用掩码
             else:
                 if si == entry_num:
