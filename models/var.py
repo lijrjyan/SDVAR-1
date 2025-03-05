@@ -584,8 +584,10 @@ class SDVAR(nn.Module):
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
 
                 if si == entry_num:
-                    x = target_next_token_map[:,exit_points[entry_num-1]:pindex]
-                    print(f"x_truc:{exit_points[entry_num-1]} {pindex}")
+                    if not entry_num == 1:
+                        x = target_next_token_map[:,exit_points[entry_num-1]:pindex]
+                    else:
+                        x = target_next_token_map[:,0:pindex]
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
                 else:
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
