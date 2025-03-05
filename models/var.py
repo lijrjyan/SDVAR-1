@@ -509,7 +509,7 @@ class SDVAR(nn.Module):
         pindex = exit_points[entry_num]
 
         device = torch.device("cuda:0")
-        attn_bias = attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
+        attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
         attn_bias = attn_bias.to(device)
 
         self.target_model.rng = self.draft_model.rng
