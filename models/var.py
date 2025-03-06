@@ -1065,7 +1065,7 @@ class SDVAR(nn.Module):
         sindex = start_points[entry_num]
         device = torch.device("cuda:0")
 
-        attn_bias = self.attn_bias_for_sdmasking[:,:,0:sindex,0:sindex]
+        attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
         attn_bias = attn_bias.to(device)
 
         target_sos, target_cond_BD, target_cond_BD_or_gss, \
@@ -1116,6 +1116,7 @@ class SDVAR(nn.Module):
 
                 if si == entry_num:
                     x = target_next_token_map[:,sindex:pindex]
+                    print(x.shape)
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
                 else:
                     target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
