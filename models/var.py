@@ -692,7 +692,9 @@ class SDVAR(nn.Module):
                 fill_value=self.target_model.num_classes if label_B < 0 else label_B,
                 device=self.target_model.lvl_1L.device
             )
-         
+        start_points = [0,1,5,14,30,55,91,155,255,424]
+        exit_points = [1,5,14,30,55,91,155,255,424,680]
+
         #####
         # target_model生成warmup
         #####
@@ -778,11 +780,14 @@ class SDVAR(nn.Module):
         draft_cur_L = 0
         draft_next_token_map = draft_first_token_map
         draft_token_hub = []
+        pindex = exit_points[warmup_step+1] 
+        sindex = start_points[warmup_step]
         
         # 继承warmup
         draft_next_token_map = warmup_token_hub
         draft_next_token_map = self.draft_model.word_embed(draft_next_token_map) + draft_lvl_pos[:,1:5]  
         draft_next_token_map = draft_next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
+        draft_next_token_map = torch.cat([draft_first_token_map,draft_next_token_map],dim=1)
  
         for blk in self.draft_model.blocks:
             blk.attn.kv_caching(True)
@@ -798,9 +803,38 @@ class SDVAR(nn.Module):
 
             ratio = si / self.num_stages_minus_1
             draft_cur_L += pn*pn
-            x = draft_next_token_map
-            
-            AdaLNSelfAttn.forward
+
+            if sd_mask != 0:
+                
+                if sd_mask == 1:
+                    # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
+                    attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
+                    attn_bias = attn_bias.to(device)
+                if sd_mask == 2:
+                    # sd_mask = 2, 全部层不包括未预测这层进行block-wise的掩码
+                    attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex].clone()
+                    attn_bias[:, :, sindex:pindex, :] = 0.0
+                    attn_bias = attn_bias.to(device)
+                if sd_mask == 3:
+                    # sd_mask = 3, 进行因果掩码
+                    attn_bias = self.draft_model.attn_bias_for_masking[:,:,0:pindex,0:pindex]
+
+                x = draft_next_token_map
+                AdaLNSelfAttn.forward
+                # 这里我们暂时不检测也不用attn_bias，因为我们当前只截取了进入层的
+                if si == entry_num:
+                    for b in self.draft_model.blocks:
+                        x = b(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=attn_bias)
+                else:
+                    for b in self.draft_model.blocks:
+                        x = b(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=None)
+
+                if si == entry_num:
+                    x = draft_next_token_map[:,sindex:pindex]
+                    draft_logits_BlV = self.draft_model.get_logits(x, draft_cond_BD)
+                else:
+                    draft_logits_BlV = self.draft_model.get_logits(x, draft_cond_BD)
+
             for blk in self.draft_model.blocks:
                 x = blk(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=None)
             draft_logits_BlV = self.draft_model.get_logits(x, draft_cond_BD)            
@@ -857,8 +891,7 @@ class SDVAR(nn.Module):
         ######
         #  target模型接受draft模型生成的内容然后生成最后一层的内容
         ######
-        start_points = [0,1,5,14,30,55,91,155,255,424]
-        exit_points = [1,5,14,30,55,91,155,255,424,680]
+
         pindex = exit_points[entry_num]
         sindex = start_points[entry_num]
         device = torch.device("cuda:0")
