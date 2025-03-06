@@ -694,6 +694,7 @@ class SDVAR(nn.Module):
             )
         start_points = [0,1,5,14,30,55,91,155,255,424]
         exit_points = [1,5,14,30,55,91,155,255,424,680]
+        device = torch.device("cuda:0")
 
         #####
         # target_model生成warmup
@@ -805,7 +806,7 @@ class SDVAR(nn.Module):
             draft_cur_L += pn*pn
 
             if sd_mask != 0:
-                
+
                 if sd_mask == 1:
                     # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
                     attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
@@ -894,7 +895,6 @@ class SDVAR(nn.Module):
 
         pindex = exit_points[entry_num]
         sindex = start_points[entry_num]
-        device = torch.device("cuda:0")
 
         # 由于我们warmup已经做了初始化所以就不用再整一遍了
         # target_sos, target_cond_BD, target_cond_BD_or_gss, \
