@@ -848,7 +848,9 @@ class SDVAR(nn.Module):
 
         # draft模型生成完毕  
         if len(draft_token_hub) != 0:   
-            draft_token_hub = torch.cat([warmup_token_hub,draft_token_hub], dim = 1)      
+            print(warmup_token_hub.shape)
+            draft_token_hub = torch.cat(draft_token_hub, dim = 1)      
+            print(draft_token_hub.shape)
         for blk in self.draft_model.blocks:
             blk.attn.kv_caching(False)
         
