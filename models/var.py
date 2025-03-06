@@ -877,7 +877,7 @@ class SDVAR(nn.Module):
             # sd_mask = 0, 不需要使用掩码
             else:
                 if si == entry_num:
-                    x = target_next_token_map[:, exit_points[entry_num-1]:pindex]
+                    x = target_next_token_map[:, sindex:pindex]
                 else:
                     x = target_next_token_map
                 AdaLNSelfAttn.forward
