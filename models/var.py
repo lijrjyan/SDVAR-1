@@ -363,6 +363,29 @@ class SDVAR(nn.Module):
         
         self.attn_bias_for_sdmasking = attn_bias_for_sdmasking
 
+    def init_param(
+            self,
+            model: VAR,
+            B: int,
+            label_B,
+        ):        
+        sos = cond_BD = model.class_emb(
+            torch.cat((label_B, torch.full_like(label_B, fill_value=model.num_classes)), dim=0)
+        )   
+        cond_BD_or_gss = model.shared_ada_lin(cond_BD)
+
+        lvl_pos = model.lvl_embed(model.lvl_1L) + model.pos_1LC
+
+        first_token_map = (
+            sos.unsqueeze(1).expand(2*B, model.first_l, -1)
+            + model.pos_start.expand(2*B, model.first_l, -1)
+            + lvl_pos[:, :model.first_l]
+        )
+
+        first_f_hat = sos.new_zeros(B, model.Cvae, model.patch_nums[-1], model.patch_nums[-1])
+
+        return sos, cond_BD, cond_BD_or_gss, lvl_pos, first_token_map, first_f_hat
+    
     # 是否使用sd_masking
     @torch.no_grad()
     def sdvar_autoregressive_infer_cfg_sd_test1(
@@ -1181,4 +1204,3 @@ class SDVAR(nn.Module):
             blk.attn.kv_caching(False)   
                     
         return self.vae_proxy[0].fhat_to_img(target_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
-
