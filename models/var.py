@@ -949,7 +949,6 @@ class SDVAR(nn.Module):
         :param label_B: imagenet label; if None, randomly sampled
         :param g_seed: random seed
         :param cfg: classifier-free guidance ratio
-        这里可以考虑top_k, top_p是否需要将target_model和draft_model分开，这样可以更加有效？
         :param top_k: top-k sampling
         :param top_p: top-p sampling
         :param more_smooth: smoothing the pred using gumbel softmax; only used in visualization, not used in FID/IS benchmarking
@@ -1132,13 +1131,10 @@ class SDVAR(nn.Module):
                 target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
 
             # 这里进行了改动，我们没有进行重新采样，因为实际上我们应该继续使用之前的f_hat,
-
-            # print(f"target:{target_logits_BlV.shape}")
-
             target_logits_BlV = (1+t) * target_logits_BlV[:B] - t * target_logits_BlV[B:]
             target_idx_Bl = sample_with_top_k_top_p_(
                 target_logits_BlV,
-                rng=self.target_model.rng,
+                rng=self.rng,
                 top_k=top_k,
                 top_p=top_p,
                 num_samples=1
@@ -1146,19 +1142,19 @@ class SDVAR(nn.Module):
 
 
             if not more_smooth: # this is the default case
-                target_h_BChw = self.draft_model.vae_quant_proxy[0].embedding(target_idx_Bl)   # B, l, Cvae
+                target_h_BChw = self.vae_quant_proxy[0].embedding(target_idx_Bl)   # B, l, Cvae
             else:   # not used when evaluating FID/IS/Precision/Recall
                 target_gum_t = max(0.27 * (1 - ratio * 0.95), 0.005)   # refer to mask-git
                 target_h_BChw = gumbel_softmax_with_rng(
                     target_logits_BlV.mul(1 + ratio),
                     tau=target_gum_t,
                     hard=False, dim=-1,
-                    rng=self.draft_model.rng
-                ) @ self.draft_model.vae_quant_proxy[0].embedding.weight.unsqueeze(0)
+                    rng=self.rng
+                ) @ self.vae_quant_proxy[0].embedding.weight.unsqueeze(0)
 
             target_h_BChw = target_h_BChw.transpose_(1, 2).reshape(B, self.target_model.Cvae, pn, pn)
 
-            target_f_hat, target_next_token_map = self.draft_model.vae_quant_proxy[0].get_next_autoregressive_input(
+            target_f_hat, target_next_token_map = self.vae_quant_proxy[0].get_next_autoregressive_input(
                 si, len(self.patch_nums), target_f_hat, target_h_BChw
             )
             
@@ -1172,7 +1168,7 @@ class SDVAR(nn.Module):
         for blk in self.target_model.blocks:
             blk.attn.kv_caching(False)   
                     
-        return self.draft_model.vae_proxy[0].fhat_to_img(target_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
+        return self.vae_proxy[0].fhat_to_img(target_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
 
 
     def init_param(
