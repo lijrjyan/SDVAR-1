@@ -1028,7 +1028,7 @@ class SDVAR(nn.Module):
         similarity_threshold: float = 0.8, # Threshold for accepting draft tokens
     ):
         """
-        Speculative decoding implementation for VAR model
+        only used for inference, on autoregressive mode
         :param B: batch size
         :param label_B: imagenet label; if None, randomly sampled
         :param g_seed: random seed
@@ -1036,11 +1036,27 @@ class SDVAR(nn.Module):
         :param top_k: top-k sampling
         :param top_p: top-p sampling
         :param more_smooth: smoothing the pred using gumbel softmax; only used in visualization, not used in FID/IS benchmarking
-        :param entry_num: entry point for target model
-        :param sd_mask: masking strategy (0: no mask, 1: block-wise mask, 2: modified block-wise mask, 3: causal mask)
+        :param entry_num: 转换模型的节点
+        :param sd_mask: 是否使用我们自己写的block_wise的掩码
         :param similarity_threshold: threshold for accepting draft tokens based on logit similarity
-        :return: Generated image (B, 3, H, W) in [0, 1]
+        :return: if returns_vemb: list of embedding h_BChw := vae_embed(idx_Bl), else: list of idx_Bl
         """
+        ###### 通用参数参数
+        assert self.draft_model.patch_nums == self.target_model.patch_nums
+        assert self.draft_model.num_stages_minus_1 == self.target_model.num_stages_minus_1
+        self.patch_nums = self.draft_model.patch_nums
+        self.num_stages_minus_1 = self.draft_model.num_stages_minus_1
+
+        total_stages = len(self.patch_nums)
+
+        self.vae_proxy = self.target_model.vae_proxy
+        self.vae_quant_proxy = self.target_model.vae_quant_proxy
+
+        if g_seed is not None:
+            self.rng = self.target_model.rng.manual_seed(g_seed)
+        else:
+            self.rng = None
+        
         # Special case for entry_num = 0, just use the target model directly
         if entry_num == 0:
             return self.target_model.autoregressive_infer_cfg(
@@ -1052,27 +1068,7 @@ class SDVAR(nn.Module):
                 top_p=top_p,
                 more_smooth=more_smooth
             )
-            
-        ###### Common parameters and initialization
-        assert self.draft_model.patch_nums == self.target_model.patch_nums
-        assert self.draft_model.num_stages_minus_1 == self.target_model.num_stages_minus_1
-        self.patch_nums = self.draft_model.patch_nums
-        self.num_stages_minus_1 = self.draft_model.num_stages_minus_1
 
-        total_stages = len(self.patch_nums)
-        start_points = [0, 1, 5, 14, 30, 55, 91, 155, 255, 424]
-        exit_points = [1, 5, 14, 30, 55, 91, 155, 255, 424, 680]
-        device = torch.device("cuda:0")
-
-        self.vae_proxy = self.target_model.vae_proxy
-        self.vae_quant_proxy = self.target_model.vae_quant_proxy
-
-        if g_seed is not None:
-            self.rng = self.target_model.rng.manual_seed(g_seed)
-        else:
-            self.rng = None
-
-        # Process label batch
         if label_B is None:
             label_B = torch.multinomial(
                 self.target_model.uniform_prob, num_samples=B, replacement=True, generator=self.rng
@@ -1084,7 +1080,6 @@ class SDVAR(nn.Module):
                 device=self.target_model.lvl_1L.device
             )
 
-        ###### Initialize draft model parameters
         draft_sos, draft_cond_BD, draft_cond_BD_or_gss, \
         draft_lvl_pos, draft_first_token_map, draft_f_hat = self.init_param(self.draft_model, B, label_B)
 
@@ -1092,15 +1087,15 @@ class SDVAR(nn.Module):
         draft_next_token_map = draft_first_token_map
         draft_token_hub = []
         
-        speculative_token = None  # Store the token to be verified
+        # Store the last batch of draft tokens for verification
+        last_draft_idx_Bl = None
         
-        # Enable KV caching for draft model
         for blk in self.draft_model.blocks:
             blk.attn.kv_caching(True)
 
-        ###### Generate with draft model up to entry_num
         for si, pn in enumerate(self.patch_nums):
-            # Stop at entry_num
+            
+            # 生成0-entry_num-1
             if si >= entry_num:
                 break
 
@@ -1108,16 +1103,13 @@ class SDVAR(nn.Module):
             draft_cur_L += pn*pn
             x = draft_next_token_map
             
-            # Process through transformer blocks
             for blk in self.draft_model.blocks:
                 x = blk(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=None)
-            
-            # Get logits and apply CFG
             draft_logits_BlV = self.draft_model.get_logits(x, draft_cond_BD)            
-            t = cfg * ratio
-            draft_logits_BlV = (1+t)*draft_logits_BlV[:B] - t*draft_logits_BlV[B:]
             
-            # Sample tokens
+            t = cfg * ratio
+            draft_logits_BlV = (1+t)*draft_logits_BlV[:B] - t*draft_logits_BlV[B:]  # (B, l, V)
+
             draft_idx_Bl = sample_with_top_k_top_p_(
                 draft_logits_BlV,
                 rng=self.rng,
@@ -1126,190 +1118,167 @@ class SDVAR(nn.Module):
                 num_samples=1
             )[:, :, 0]
             
-            # If this is the last step before entry_num, store the token for verification
+            # Store last batch of draft tokens for verification if this is the last stage before entry_num
             if si == entry_num - 1:
-                speculative_token = draft_idx_Bl.clone()
+                last_draft_idx_Bl = draft_idx_Bl.clone()
 
-            # Convert indices to embeddings
+            # 在所有模型中都使用同一个vae
             if not more_smooth:
                 draft_h_BChw = self.vae_quant_proxy[0].embedding(draft_idx_Bl)
             else:
                 draft_gum_t = max(0.27 * (1 - ratio * 0.95), 0.005)
                 draft_h_BChw = gumbel_softmax_with_rng(
                     draft_logits_BlV.mul(1 + ratio), tau=draft_gum_t, hard=False, dim=-1, rng=self.rng
-                ) @ self.vae_quant_proxy[0].embedding.weight.unsqueeze(0)
+                    ) @ self.vae_quant_proxy[0].embedding.weight.unsqueeze(0)
             
-            # Reshape and process through VAE
-            draft_h_BChw = draft_h_BChw.transpose(1, 2).reshape(B, self.draft_model.Cvae, pn, pn)
+            draft_h_BChw = draft_h_BChw.transpose(1,2).reshape(B, self.draft_model.Cvae, pn, pn)
+
             draft_f_hat, draft_next_token_map = self.vae_quant_proxy[0].get_next_autoregressive_input(
                 si, total_stages, draft_f_hat, draft_h_BChw
             )
 
-            # Prepare for next stage
-            if si != self.num_stages_minus_1:
+            if si != self.num_stages_minus_1:   # prepare for next stage
                 next_pn = self.patch_nums[si+1]
-                draft_next_token_map = draft_next_token_map.view(B, self.draft_model.Cvae, -1).transpose(1, 2)
-                draft_token_hub.append(draft_next_token_map.clone())
+                draft_next_token_map = draft_next_token_map.view(B, self.draft_model.Cvae, -1).transpose(1,2)
+                draft_token_hub.append(draft_next_token_map)
                 draft_next_token_map = (
                     self.draft_model.word_embed(draft_next_token_map)
                     + draft_lvl_pos[:, draft_cur_L : draft_cur_L + next_pn*next_pn]
                 )
-                draft_next_token_map = draft_next_token_map.repeat(2, 1, 1)
+                draft_next_token_map = draft_next_token_map.repeat(2,1,1)
 
-            # Return if at final stage
             if si == self.num_stages_minus_1:
                 for blk in self.draft_model.blocks:
                     blk.attn.kv_caching(False)
-                return self.vae_proxy[0].fhat_to_img(draft_f_hat).add_(1).mul_(0.5)
+                return self.vae_proxy[0].fhat_to_img(draft_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
 
-        # Process draft tokens and disable KV caching
-        if len(draft_token_hub) > 0:   
+        # draft模型生成完毕  
+        if len(draft_token_hub) != 0:   
             draft_token_hub = torch.cat(draft_token_hub, dim=1)      
-        
         for blk in self.draft_model.blocks:
             blk.attn.kv_caching(False)
         
-        ###### Initialize target model parameters
-        # Use the correct indices for the entry point
-        pindex = exit_points[entry_num-1] if entry_num > 0 else 0  # Exit point of previous stage
-        sindex = start_points[entry_num-1] if entry_num > 0 else 0  # Start point of previous stage
+
+        ###### target模型接受draft模型生成的内容然后生成最后一层的内容
+        start_points = [0,1,5,14,30,55,91,155,255,424]
+        exit_points = [1,5,14,30,55,91,155,255,424,680]
+        pindex = exit_points[entry_num]
+        sindex = start_points[entry_num]
+        device = torch.device("cuda:0")
+
 
         target_sos, target_cond_BD, target_cond_BD_or_gss, \
         target_lvl_pos, target_first_token_map, target_f_hat = self.init_param(self.target_model, B, label_B)
 
         target_cur_L = 0
-        target_f_hat = draft_f_hat.clone()  # Clone to maintain separate state
+        target_f_hat = draft_f_hat
 
-        # Process draft token hub for target model
-        if len(draft_token_hub) > 0:
-            target_next_token_map = draft_token_hub 
-            # This needs to match the dimensions
-            if entry_num > 0:
-                target_next_token_map = self.target_model.word_embed(target_next_token_map)
-                
-                # Check if dimensions match
-                if target_next_token_map.size(1) == target_lvl_pos[:, 1:pindex].size(1):
-                    target_next_token_map = target_next_token_map + target_lvl_pos[:, 1:pindex]
-                else:
-                    # Handle dimension mismatch - use only what we need
-                    pos_size = min(target_next_token_map.size(1), target_lvl_pos[:, 1:pindex].size(1))
-                    target_next_token_map = target_next_token_map[:, :pos_size] + target_lvl_pos[:, 1:pos_size+1]
-                    
-                target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double for CFG
-                target_next_token_map = torch.cat([target_first_token_map, target_next_token_map], dim=1)
+        # 如果draft_token_hub不为0
+        if not len(draft_token_hub) == 0:
+            # 接受之前生成的做为target_model输出的prefix
+            target_next_token_map = draft_token_hub    
+
+            target_next_token_map = self.target_model.word_embed(target_next_token_map) + target_lvl_pos[:,1:pindex]  
+            
+            # 正常来说前边的已经进行过调整，所以这里应该只有最后一段需要cfg的修改。
+            target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
+            if len(target_next_token_map) != 0:
+                target_next_token_map = torch.cat([target_first_token_map,target_next_token_map],dim=1)
             else:
                 target_next_token_map = target_first_token_map
         else: 
             target_next_token_map = target_first_token_map
         
-        ###### Speculative verification stage
-        # Enable KV caching for target model
         for blk in self.target_model.blocks:
             blk.attn.kv_caching(True)
-        
-        # For each stage starting from entry_num
-        for si, pn in enumerate(self.patch_nums):
-            if si < entry_num:
-                target_cur_L += pn*pn
-                continue
-                    
+
+        for si, pn in enumerate(self.patch_nums):   # si: i-th segment
             ratio = si / self.num_stages_minus_1
             target_cur_L += pn*pn
-            t = cfg * ratio
+            t = cfg * ratio 
             
-            # Set up masks based on current entry point
-            if si == entry_num:
-                current_pn_square = pn*pn
-                
-                # Use the correct indices for masking
-                if entry_num > 0:
-                    pindex = exit_points[entry_num-1]
-                    sindex = start_points[entry_num-1]
-                else:
-                    pindex = current_pn_square
-                    sindex = 0
-                    
-                # Initialize attn_bias based on mask type
-                if sd_mask != 0:
-                    if sd_mask == 1:
-                        # Block-wise mask including current level
-                        attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex]
-                        attn_bias = attn_bias.to(device)
-                    elif sd_mask == 2:
-                        # Block-wise mask excluding current level
-                        attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex].clone()
-                        attn_bias[:, :, sindex:pindex, :] = 0.0
-                        attn_bias = attn_bias.to(device)
-                    elif sd_mask == 3:
-                        # Causal mask
-                        attn_bias = self.target_model.attn_bias_for_masking[:, :, 0:pindex, 0:pindex]
-                else:
-                    attn_bias = None
-            else:
-                attn_bias = None
-                    
-            # SPECULATIVE VERIFICATION LOGIC - only for the first step after entry_num
-            if si == entry_num and speculative_token is not None:
-                # Verify the draft model's predictions
-                # First, get target model's logits for the context
+            if si < entry_num:
+                continue
+
+            # 我们实际上只需要让进入那一层找到对应的next_token_map就可以了，剩下的就是x = target_next_token_map
+            if sd_mask != 0:
+                if sd_mask == 1:
+                    # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
+                    attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
+                    attn_bias = attn_bias.to(device)
+                if sd_mask == 2:
+                    # sd_mask = 2, 全部层不包括未预测这层进行block-wise的掩码
+                    attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex].clone()
+                    attn_bias[:, :, sindex:pindex, :] = 0.0
+                    attn_bias = attn_bias.to(device)
+                if sd_mask == 3:
+                    # sd_mask = 3, 进行因果掩码
+                    attn_bias = self.target_model.attn_bias_for_masking[:,:,0:pindex,0:pindex]
+
                 x = target_next_token_map
-                
-                for b in self.target_model.blocks:
-                    x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=attn_bias)
+                # 这里我们暂时不检测也不用attn_bias，因为我们当前只截取了进入层的
+                if si == entry_num:
+                    for b in self.target_model.blocks:
+                        x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=attn_bias)
+                else:
+                    for b in self.target_model.blocks:
+                        x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
+
+                if si == entry_num:
+                    rel_x = x if last_draft_idx_Bl is None else target_next_token_map[:,sindex:pindex]
+                    target_logits_BlV = self.target_model.get_logits(rel_x, target_cond_BD)
+                else:
+                    target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
                     
-                # Get logits for the current segment
-                target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
-                target_logits_BlV = (1+t)*target_logits_BlV[:B] - t*target_logits_BlV[B:]
+            else:
+                # sd_mask = 0, 不需要使用掩码
+                if si == entry_num:
+                    x = target_next_token_map[:,sindex:pindex]
+                else:
+                    x = target_next_token_map
                 
-                # Compute probability distributions
+                if si >= entry_num:
+                    for b in self.target_model.blocks:
+                        x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
+                target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
+
+            # Apply CFG
+            target_logits_BlV = (1+t) * target_logits_BlV[:B] - t * target_logits_BlV[B:]
+            
+            # ======= SPECULATIVE VERIFICATION LOGIC START =======
+            # Only apply verification at entry_num and if we have draft tokens to verify
+            if si == entry_num and last_draft_idx_Bl is not None:
+                # Compute target model probabilities
                 target_probs = torch.softmax(target_logits_BlV, dim=-1)
                 
-                # Get the target model's top predictions
+                # Get top predictions from target model
                 target_top_idxs = torch.argmax(target_probs, dim=-1)
                 
-                # Create a mask where draft and target predictions match
-                exact_match_mask = (target_top_idxs == speculative_token)
+                # Create verification mask based on both exact matches and probability threshold
+                exact_match_mask = (target_top_idxs == last_draft_idx_Bl)
                 
-                # Also accept tokens where target assigns high probability to draft's choice
-                draft_prob_in_target = torch.gather(target_probs, -1, speculative_token.unsqueeze(-1)).squeeze(-1)
+                # Also accept tokens where target assigns high probability to draft's prediction
+                draft_prob_in_target = torch.gather(target_probs, -1, last_draft_idx_Bl.unsqueeze(-1)).squeeze(-1)
                 prob_match_mask = (draft_prob_in_target > similarity_threshold)
                 
                 # Combine masks: accept if either exact match or high probability
                 verification_mask = exact_match_mask | prob_match_mask
                 
-                # For tokens that failed verification, use target's prediction instead
+                # Use verification mask to decide which tokens to keep
                 verified_idx_Bl = torch.where(
                     verification_mask,
-                    speculative_token,     # Keep draft tokens where verified
-                    target_top_idxs        # Use target tokens where not verified
+                    last_draft_idx_Bl,    # Keep draft model tokens where verified
+                    target_top_idxs       # Use target model tokens where not verified
                 )
                 
-                # Print verification statistics
+                # Report acceptance statistics
                 acceptance_rate = verification_mask.float().mean().item() * 100
-                print(f"Verification step: Accepted {acceptance_rate:.2f}% of draft tokens")
+                print(f"Verification at stage {entry_num}: Accepted {acceptance_rate:.2f}% of draft tokens")
                 
-                # Convert verified indices to embeddings
-                if not more_smooth:
-                    target_h_BChw = self.vae_quant_proxy[0].embedding(verified_idx_Bl)
-                else:
-                    target_gum_t = max(0.27 * (1 - ratio * 0.95), 0.005)
-                    target_h_BChw = gumbel_softmax_with_rng(
-                        target_logits_BlV.mul(1 + ratio), 
-                        tau=target_gum_t, 
-                        hard=False, 
-                        dim=-1, 
-                        rng=self.rng
-                    ) @ self.vae_quant_proxy[0].embedding.weight.unsqueeze(0)
+                # Use the verified tokens for generation
+                target_idx_Bl = verified_idx_Bl
             else:
-                # For subsequent steps after entry_num, generate normally with target model
-                x = target_next_token_map
-                
-                for b in self.target_model.blocks:
-                    x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
-                    
-                target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
-                target_logits_BlV = (1+t)*target_logits_BlV[:B] - t*target_logits_BlV[B:]
-                
+                # Normal sampling for other stages
                 target_idx_Bl = sample_with_top_k_top_p_(
                     target_logits_BlV,
                     rng=self.rng,
@@ -1317,35 +1286,33 @@ class SDVAR(nn.Module):
                     top_p=top_p,
                     num_samples=1
                 )[:, :, 0]
-                
-                if not more_smooth:
-                    target_h_BChw = self.vae_quant_proxy[0].embedding(target_idx_Bl)
-                else:
-                    target_gum_t = max(0.27 * (1 - ratio * 0.95), 0.005)
-                    target_h_BChw = gumbel_softmax_with_rng(
-                        target_logits_BlV.mul(1 + ratio),
-                        tau=target_gum_t,
-                        hard=False,
-                        dim=-1,
-                        rng=self.rng
-                    ) @ self.vae_quant_proxy[0].embedding.weight.unsqueeze(0)
+            # ======= SPECULATIVE VERIFICATION LOGIC END =======
 
-            # Process through VAE
-            target_h_BChw = target_h_BChw.transpose(1, 2).reshape(B, self.target_model.Cvae, pn, pn)
+            if not more_smooth: # this is the default case
+                target_h_BChw = self.vae_quant_proxy[0].embedding(target_idx_Bl)   # B, l, Cvae
+            else:   # not used when evaluating FID/IS/Precision/Recall
+                target_gum_t = max(0.27 * (1 - ratio * 0.95), 0.005)   # refer to mask-git
+                target_h_BChw = gumbel_softmax_with_rng(
+                    target_logits_BlV.mul(1 + ratio),
+                    tau=target_gum_t,
+                    hard=False, dim=-1,
+                    rng=self.rng
+                ) @ self.vae_quant_proxy[0].embedding.weight.unsqueeze(0)
+
+            target_h_BChw = target_h_BChw.transpose_(1, 2).reshape(B, self.target_model.Cvae, pn, pn)
+
             target_f_hat, target_next_token_map = self.vae_quant_proxy[0].get_next_autoregressive_input(
                 si, len(self.patch_nums), target_f_hat, target_h_BChw
             )
             
-            # Prepare for next stage
-            if si != self.num_stages_minus_1:
+            if si != self.num_stages_minus_1:   # prepare for next stage
                 next_pn = self.patch_nums[si+1]
                 target_next_token_map = target_next_token_map.view(B, self.target_model.Cvae, -1).transpose(1, 2)
                 target_next_token_map = self.target_model.word_embed(target_next_token_map) + target_lvl_pos[:, target_cur_L:target_cur_L + next_pn * next_pn]
-                target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double for CFG
+                target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
             
-        # Disable KV caching for target model
+        # target模型生成完成
         for blk in self.target_model.blocks:
             blk.attn.kv_caching(False)   
-        
-        # Return final image
+                    
         return self.vae_proxy[0].fhat_to_img(target_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
