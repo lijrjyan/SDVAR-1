@@ -1012,6 +1012,7 @@ class SDVAR(nn.Module):
             blk.attn.kv_caching(False)   
                     
         return self.vae_proxy[0].fhat_to_img(target_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
+    
     @torch.no_grad()
     def sdvar_autoregressive_infer_cfg_sd_speculative(
         self,
@@ -1040,6 +1041,18 @@ class SDVAR(nn.Module):
         :param similarity_threshold: threshold for accepting draft tokens based on logit similarity
         :return: Generated image (B, 3, H, W) in [0, 1]
         """
+        # Special case for entry_num = 0, just use the target model directly
+        if entry_num == 0:
+            return self.target_model.autoregressive_infer_cfg(
+                B=B,
+                label_B=label_B,
+                g_seed=g_seed,
+                cfg=cfg,
+                top_k=top_k,
+                top_p=top_p,
+                more_smooth=more_smooth
+            )
+            
         ###### Common parameters and initialization
         assert self.draft_model.patch_nums == self.target_model.patch_nums
         assert self.draft_model.num_stages_minus_1 == self.target_model.num_stages_minus_1
@@ -1079,7 +1092,7 @@ class SDVAR(nn.Module):
         draft_next_token_map = draft_first_token_map
         draft_token_hub = []
         
-        draft_idx_Bl_hub = []  # Store draft indices for verification
+        speculative_token = None  # Store the token to be verified
         
         # Enable KV caching for draft model
         for blk in self.draft_model.blocks:
@@ -1113,8 +1126,9 @@ class SDVAR(nn.Module):
                 num_samples=1
             )[:, :, 0]
             
-            # Store draft indices for verification later
-            draft_idx_Bl_hub.append(draft_idx_Bl)
+            # If this is the last step before entry_num, store the token for verification
+            if si == entry_num - 1:
+                speculative_token = draft_idx_Bl.clone()
 
             # Convert indices to embeddings
             if not more_smooth:
@@ -1135,7 +1149,7 @@ class SDVAR(nn.Module):
             if si != self.num_stages_minus_1:
                 next_pn = self.patch_nums[si+1]
                 draft_next_token_map = draft_next_token_map.view(B, self.draft_model.Cvae, -1).transpose(1, 2)
-                draft_token_hub.append(draft_next_token_map)
+                draft_token_hub.append(draft_next_token_map.clone())
                 draft_next_token_map = (
                     self.draft_model.word_embed(draft_next_token_map)
                     + draft_lvl_pos[:, draft_cur_L : draft_cur_L + next_pn*next_pn]
@@ -1149,15 +1163,15 @@ class SDVAR(nn.Module):
                 return self.vae_proxy[0].fhat_to_img(draft_f_hat).add_(1).mul_(0.5)
 
         # Process draft tokens and disable KV caching
-        if len(draft_token_hub) != 0:   
+        if len(draft_token_hub) > 0:   
             draft_token_hub = torch.cat(draft_token_hub, dim=1)      
+        
         for blk in self.draft_model.blocks:
             blk.attn.kv_caching(False)
         
-        
         ###### Initialize target model parameters
-        pindex = exit_points[entry_num]
-        sindex = start_points[entry_num]
+        pindex = exit_points[entry_num-1] if entry_num > 0 else 0  # Use previous level's exit point
+        sindex = start_points[entry_num-1] if entry_num > 0 else 0  # Use previous level's start point
 
         target_sos, target_cond_BD, target_cond_BD_or_gss, \
         target_lvl_pos, target_first_token_map, target_f_hat = self.init_param(self.target_model, B, label_B)
@@ -1166,14 +1180,11 @@ class SDVAR(nn.Module):
         target_f_hat = draft_f_hat.clone()  # Clone to maintain separate state
 
         # Process draft token hub for target model
-        if not len(draft_token_hub) == 0:
-            target_next_token_map = draft_token_hub    
+        if len(draft_token_hub) > 0:
+            target_next_token_map = draft_token_hub  
             target_next_token_map = self.target_model.word_embed(target_next_token_map) + target_lvl_pos[:, 1:pindex]  
             target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double for CFG
-            if len(target_next_token_map) != 0:
-                target_next_token_map = torch.cat([target_first_token_map, target_next_token_map], dim=1)
-            else:
-                target_next_token_map = target_first_token_map
+            target_next_token_map = torch.cat([target_first_token_map, target_next_token_map], dim=1)
         else: 
             target_next_token_map = target_first_token_map
         
@@ -1187,11 +1198,19 @@ class SDVAR(nn.Module):
             if si < entry_num:
                 target_cur_L += pn*pn
                 continue
-                
+                    
             ratio = si / self.num_stages_minus_1
             target_cur_L += pn*pn
             t = cfg * ratio
             
+            # Set up mask parameters
+            if entry_num > 0:
+                pindex = exit_points[entry_num-1]
+                sindex = start_points[entry_num-1]
+            else:
+                pindex = pn*pn
+                sindex = 0
+                
             # Initialize attn_bias based on mask type
             if sd_mask != 0:
                 if sd_mask == 1:
@@ -1208,28 +1227,19 @@ class SDVAR(nn.Module):
                     attn_bias = self.target_model.attn_bias_for_masking[:, :, 0:pindex, 0:pindex]
             else:
                 attn_bias = None
-                
-            # SPECULATIVE VERIFICATION LOGIC
-            if si == entry_num:
+                    
+            # SPECULATIVE VERIFICATION LOGIC - only for the first step after entry_num
+            if si == entry_num and speculative_token is not None:
                 # Verify the draft model's predictions
                 # First, get target model's logits for the context
-                x_context = target_next_token_map
+                x = target_next_token_map
                 
                 for b in self.target_model.blocks:
-                    x_context = b(x=x_context, cond_BD=target_cond_BD_or_gss, attn_bias=attn_bias)
+                    x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=attn_bias)
                     
-                # Extract the relevant segment
-                rel_segment = x_context[:, sindex:pindex]
-                
-                # Get logits for the segment
-                target_logits_BlV = self.target_model.get_logits(rel_segment, target_cond_BD)
-                
-                # Apply CFG
+                # Get logits for the current segment
+                target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
                 target_logits_BlV = (1+t)*target_logits_BlV[:B] - t*target_logits_BlV[B:]
-                
-                # Verify tokens by comparing with draft logits
-                # We'll create a mask where True means the token is accepted
-                verification_mask = torch.zeros_like(draft_idx_Bl_hub[0], dtype=torch.bool)
                 
                 # Compute probability distributions
                 target_probs = F.softmax(target_logits_BlV, dim=-1)
@@ -1238,10 +1248,10 @@ class SDVAR(nn.Module):
                 target_top_idxs = torch.argmax(target_probs, dim=-1)
                 
                 # Create a mask where draft and target predictions match
-                exact_match_mask = (target_top_idxs == draft_idx_Bl_hub[0])
+                exact_match_mask = (target_top_idxs == speculative_token)
                 
                 # Also accept tokens where target assigns high probability to draft's choice
-                draft_prob_in_target = torch.gather(target_probs, -1, draft_idx_Bl_hub[0].unsqueeze(-1)).squeeze(-1)
+                draft_prob_in_target = torch.gather(target_probs, -1, speculative_token.unsqueeze(-1)).squeeze(-1)
                 prob_match_mask = (draft_prob_in_target > similarity_threshold)
                 
                 # Combine masks: accept if either exact match or high probability
@@ -1250,9 +1260,13 @@ class SDVAR(nn.Module):
                 # For tokens that failed verification, use target's prediction instead
                 verified_idx_Bl = torch.where(
                     verification_mask,
-                    draft_idx_Bl_hub[0],  # Keep draft tokens where verified
-                    target_top_idxs       # Use target tokens where not verified
+                    speculative_token,     # Keep draft tokens where verified
+                    target_top_idxs        # Use target tokens where not verified
                 )
+                
+                # Print verification statistics
+                acceptance_rate = verification_mask.float().mean().item() * 100
+                print(f"Verification step: Accepted {acceptance_rate:.2f}% of draft tokens")
                 
                 # Convert verified indices to embeddings
                 if not more_smooth:
@@ -1266,10 +1280,6 @@ class SDVAR(nn.Module):
                         dim=-1, 
                         rng=self.rng
                     ) @ self.vae_quant_proxy[0].embedding.weight.unsqueeze(0)
-                    
-                # Print verification statistics
-                acceptance_rate = verification_mask.float().mean().item() * 100
-                print(f"Verification step: Accepted {acceptance_rate:.2f}% of draft tokens")
             else:
                 # For subsequent steps after entry_num, generate normally with target model
                 x = target_next_token_map
@@ -1312,7 +1322,7 @@ class SDVAR(nn.Module):
                 target_next_token_map = target_next_token_map.view(B, self.target_model.Cvae, -1).transpose(1, 2)
                 target_next_token_map = self.target_model.word_embed(target_next_token_map) + target_lvl_pos[:, target_cur_L:target_cur_L + next_pn * next_pn]
                 target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double for CFG
-        
+            
         # Disable KV caching for target model
         for blk in self.target_model.blocks:
             blk.attn.kv_caching(False)   
