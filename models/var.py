@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from huggingface_hub import PyTorchModelHubMixin
 
+
 import dist
 from models.basic_var import AdaLNBeforeHead, AdaLNSelfAttn
 from models.helpers import gumbel_softmax_with_rng, sample_with_top_k_top_p_
@@ -1242,7 +1243,9 @@ def sdvar_autoregressive_infer_cfg_sd_speculative(
             target_logits_BlV = (1+t)*target_logits_BlV[:B] - t*target_logits_BlV[B:]
             
             # Compute probability distributions
+            import torch.nn.functional as F
             target_probs = F.softmax(target_logits_BlV, dim=-1)
+            
             
             # Get the target model's top predictions
             target_top_idxs = torch.argmax(target_probs, dim=-1)
