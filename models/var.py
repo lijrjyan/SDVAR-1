@@ -1108,7 +1108,7 @@ class SDVAR(nn.Module):
             draft_cur_L += pn*pn
             x = draft_next_token_map
             
-            # Process through transformer blocks
+            AdaLNSelfAttn.forward
             for blk in self.draft_model.blocks:
                 x = blk(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=None)
             
