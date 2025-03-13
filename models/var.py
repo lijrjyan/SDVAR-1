@@ -1170,8 +1170,8 @@ class SDVAR(nn.Module):
             blk.attn.kv_caching(False)
         
         ###### Initialize target model parameters
-        pindex = exit_points[entry_num-1] if entry_num > 0 else 0  # Use previous level's exit point
-        sindex = start_points[entry_num-1] if entry_num > 0 else 0  # Use previous level's start point
+        pindex = exit_points[entry_num] if entry_num > 0 else 0  # Use previous level's exit point
+        sindex = start_points[entry_num] if entry_num > 0 else 0  # Use previous level's start point
 
         target_sos, target_cond_BD, target_cond_BD_or_gss, \
         target_lvl_pos, target_first_token_map, target_f_hat = self.init_param(self.target_model, B, label_B)
