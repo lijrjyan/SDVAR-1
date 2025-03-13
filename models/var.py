@@ -1108,7 +1108,7 @@ class SDVAR(nn.Module):
             draft_cur_L += pn*pn
             x = draft_next_token_map
             
-            AdaLNSelfAttn.forward
+            # Process through transformer blocks
             for blk in self.draft_model.blocks:
                 x = blk(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=None)
             
@@ -1170,8 +1170,9 @@ class SDVAR(nn.Module):
             blk.attn.kv_caching(False)
         
         ###### Initialize target model parameters
-        pindex = exit_points[entry_num] if entry_num > 0 else 0  # Use previous level's exit point
-        sindex = start_points[entry_num] if entry_num > 0 else 0  # Use previous level's start point
+        # Use the correct indices for the entry point
+        pindex = exit_points[entry_num-1] if entry_num > 0 else 0  # Exit point of previous stage
+        sindex = start_points[entry_num-1] if entry_num > 0 else 0  # Start point of previous stage
 
         target_sos, target_cond_BD, target_cond_BD_or_gss, \
         target_lvl_pos, target_first_token_map, target_f_hat = self.init_param(self.target_model, B, label_B)
@@ -1179,17 +1180,23 @@ class SDVAR(nn.Module):
         target_cur_L = 0
         target_f_hat = draft_f_hat.clone()  # Clone to maintain separate state
 
-        # 如果draft_token_hub不为0
-        if not len(draft_token_hub) == 0:
-            # 接受之前生成的做为target_model输出的prefix
-            target_next_token_map = draft_token_hub    
-
-            target_next_token_map = self.target_model.word_embed(target_next_token_map) + target_lvl_pos[:,1:pindex]  
-            
-            # 正常来说前边的已经进行过调整，所以这里应该只有最后一段需要cfg的修改。
-            target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
-            if len(target_next_token_map) != 0:
-                target_next_token_map = torch.cat([target_first_token_map,target_next_token_map],dim=1)
+        # Process draft token hub for target model
+        if len(draft_token_hub) > 0:
+            target_next_token_map = draft_token_hub 
+            # This needs to match the dimensions
+            if entry_num > 0:
+                target_next_token_map = self.target_model.word_embed(target_next_token_map)
+                
+                # Check if dimensions match
+                if target_next_token_map.size(1) == target_lvl_pos[:, 1:pindex].size(1):
+                    target_next_token_map = target_next_token_map + target_lvl_pos[:, 1:pindex]
+                else:
+                    # Handle dimension mismatch - use only what we need
+                    pos_size = min(target_next_token_map.size(1), target_lvl_pos[:, 1:pindex].size(1))
+                    target_next_token_map = target_next_token_map[:, :pos_size] + target_lvl_pos[:, 1:pos_size+1]
+                    
+                target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double for CFG
+                target_next_token_map = torch.cat([target_first_token_map, target_next_token_map], dim=1)
             else:
                 target_next_token_map = target_first_token_map
         else: 
@@ -1210,28 +1217,34 @@ class SDVAR(nn.Module):
             target_cur_L += pn*pn
             t = cfg * ratio
             
-            # Set up mask parameters
-            if entry_num > 0:
-                pindex = exit_points[entry_num-1]
-                sindex = start_points[entry_num-1]
-            else:
-                pindex = pn*pn
-                sindex = 0
+            # Set up masks based on current entry point
+            if si == entry_num:
+                current_pn_square = pn*pn
                 
-            # Initialize attn_bias based on mask type
-            if sd_mask != 0:
-                if sd_mask == 1:
-                    # Block-wise mask including current level
-                    attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex]
-                    attn_bias = attn_bias.to(device)
-                elif sd_mask == 2:
-                    # Block-wise mask excluding current level
-                    attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex].clone()
-                    attn_bias[:, :, sindex:pindex, :] = 0.0
-                    attn_bias = attn_bias.to(device)
-                elif sd_mask == 3:
-                    # Causal mask
-                    attn_bias = self.target_model.attn_bias_for_masking[:, :, 0:pindex, 0:pindex]
+                # Use the correct indices for masking
+                if entry_num > 0:
+                    pindex = exit_points[entry_num-1]
+                    sindex = start_points[entry_num-1]
+                else:
+                    pindex = current_pn_square
+                    sindex = 0
+                    
+                # Initialize attn_bias based on mask type
+                if sd_mask != 0:
+                    if sd_mask == 1:
+                        # Block-wise mask including current level
+                        attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex]
+                        attn_bias = attn_bias.to(device)
+                    elif sd_mask == 2:
+                        # Block-wise mask excluding current level
+                        attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex].clone()
+                        attn_bias[:, :, sindex:pindex, :] = 0.0
+                        attn_bias = attn_bias.to(device)
+                    elif sd_mask == 3:
+                        # Causal mask
+                        attn_bias = self.target_model.attn_bias_for_masking[:, :, 0:pindex, 0:pindex]
+                else:
+                    attn_bias = None
             else:
                 attn_bias = None
                     
@@ -1250,7 +1263,6 @@ class SDVAR(nn.Module):
                 
                 # Compute probability distributions
                 target_probs = torch.softmax(target_logits_BlV, dim=-1)
-                
                 
                 # Get the target model's top predictions
                 target_top_idxs = torch.argmax(target_probs, dim=-1)
