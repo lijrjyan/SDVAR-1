@@ -1244,7 +1244,7 @@ def sdvar_autoregressive_infer_cfg_sd_speculative(
             
             # Compute probability distributions
             import torch.nn.functional as F
-            target_probs = F.softmax(target_logits_BlV, dim=-1)
+            target_probs = torch.softmax(target_logits_BlV, dim=-1)
             
             
             # Get the target model's top predictions
