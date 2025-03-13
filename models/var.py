@@ -1179,12 +1179,19 @@ class SDVAR(nn.Module):
         target_cur_L = 0
         target_f_hat = draft_f_hat.clone()  # Clone to maintain separate state
 
-        # Process draft token hub for target model
-        if len(draft_token_hub) > 0:
-            target_next_token_map = draft_token_hub  
-            target_next_token_map = self.target_model.word_embed(target_next_token_map) + target_lvl_pos[:, 1:pindex]  
-            target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double for CFG
-            target_next_token_map = torch.cat([target_first_token_map, target_next_token_map], dim=1)
+        # 如果draft_token_hub不为0
+        if not len(draft_token_hub) == 0:
+            # 接受之前生成的做为target_model输出的prefix
+            target_next_token_map = draft_token_hub    
+
+            target_next_token_map = self.target_model.word_embed(target_next_token_map) + target_lvl_pos[:,1:pindex]  
+            
+            # 正常来说前边的已经进行过调整，所以这里应该只有最后一段需要cfg的修改。
+            target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
+            if len(target_next_token_map) != 0:
+                target_next_token_map = torch.cat([target_first_token_map,target_next_token_map],dim=1)
+            else:
+                target_next_token_map = target_first_token_map
         else: 
             target_next_token_map = target_first_token_map
         
