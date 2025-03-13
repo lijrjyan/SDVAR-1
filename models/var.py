@@ -1,7 +1,6 @@
 import math
 from functools import partial
 from typing import Optional, Tuple, Union
-import torch.nn.functional as F
 import torch
 import torch.nn as nn
 from huggingface_hub import PyTorchModelHubMixin
@@ -1243,7 +1242,6 @@ def sdvar_autoregressive_infer_cfg_sd_speculative(
             target_logits_BlV = (1+t)*target_logits_BlV[:B] - t*target_logits_BlV[B:]
             
             # Compute probability distributions
-            import torch.nn.functional as F
             target_probs = torch.softmax(target_logits_BlV, dim=-1)
             
             
