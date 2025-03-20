@@ -1306,6 +1306,44 @@ class SDVAR(nn.Module):
         for blk in self.draft_model.blocks:
         # for blk in self.target_model.blocks:
             blk.attn.kv_caching(False)   
+        # 变量名列表
+        variable_names = ["sos", "cond_BD", "cond_BD_or_gss", "lvl_pos", "first_token_map", "f_hat"]
+
+        # 目标值和草稿值的字典
+        target_dict = {
+            "sos": target_sos, "cond_BD": target_cond_BD, "cond_BD_or_gss": target_cond_BD_or_gss,
+            "lvl_pos": target_lvl_pos, "first_token_map": target_first_token_map, "f_hat": target_f_hat
+        }
+
+        draft_dict = {
+            "sos": draft_sos, "cond_BD": draft_cond_BD, "cond_BD_or_gss": draft_cond_BD_or_gss,
+            "lvl_pos": draft_lvl_pos, "first_token_map": draft_first_token_map, "f_hat": draft_f_hat
+        }
+
+        # 误差容忍度（用于浮点数）
+        tolerance = 1e-8
+
+        # 遍历变量，检查哪些不同
+        diff_vars = []
+        for var in variable_names:
+            target_val = target_dict[var]
+            draft_val = draft_dict[var]
+
+            # 判断数据类型，使用不同的比较方式
+            if target_val.dtype in [torch.float32, torch.float64]:
+                different = not torch.allclose(target_val, draft_val, atol=tolerance)
+            else:
+                different = not torch.equal(target_val, draft_val)
+
+            # 记录不同的变量名
+            if different:
+                diff_vars.append(var)
+
+        # 输出不同的变量
+        if diff_vars:
+            print("Variables with differences:", ", ".join(diff_vars))
+        else:
+            print("All variables are identical.")
                     
         return self.vae_proxy[0].fhat_to_img(target_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
   
