@@ -1217,64 +1217,21 @@ class SDVAR(nn.Module):
             if si < entry_num:
                 continue
 
-            # 我们实际上只需要让进入那一层找到对应的next_token_map就可以了，剩下的就是x = target_next_token_map
-            if sd_mask != 0:
-                if sd_mask == 1:
-                    # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
-                    attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
-                    attn_bias = attn_bias.to(device)
-                elif sd_mask == 2:
-                    # sd_mask = 2, 全部层不包括未预测这层进行block-wise的掩码
-                    attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex].clone()
-                    attn_bias[:, :, sindex:pindex, :] = 0.0
-                    attn_bias = attn_bias.to(device)
-                elif sd_mask == 3:
-                    # sd_mask = 3, 进行因果掩码
-                    attn_bias = self.target_model.attn_bias_for_masking[:,:,0:pindex,0:pindex]
-                elif sd_mask == 4: 
-                    # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
-                    attn_bias = self.attn_bias_for_block[:,:,0:pindex,0:pindex]
-                    attn_bias = attn_bias.to(device)
-                elif sd_mask == 5:
-                    # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
-                    attn_bias = self.attn_bias_for_block[:, :, 0:pindex, 0:pindex].clone()
-                    attn_bias[:, :, sindex:pindex, :] = 0.0
-                    attn_bias = attn_bias.to(device)
-
-                x = target_next_token_map
-                AdaLNSelfAttn.forward
-                # 这里我们暂时不检测也不用attn_bias，因为我们当前只截取了进入层的
-                if si == entry_num:
-                    for b in self.target_model.blocks:
-                    # for b in self.draft_model.blocks:
-                        x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=attn_bias)
-                else:
-                    for b in self.target_model.blocks:
-                    # for b in self.draft_model.blocks:
-                        x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
-
-                if si == entry_num:
-                    x = target_next_token_map[:,sindex:pindex]
-                    target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
-                else:
-                    target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
-                    
+            if si == entry_num:
+                # x = target_next_token_map[:,sindex:pindex]
+                x = draft_next_token_map
+                print(f"x.shape: {x.shape}")
+                print(f"draft_next_token_map.shape: {draft_next_token_map.shape}")
+                print(f"same or not :{torch.equal(x,draft_next_token_map)}")
             else:
-                # sd_mask = 0, 不需要使用掩码
+                x = target_next_token_map
+            AdaLNSelfAttn.forward
+            if si >= entry_num:
+                for b in self.target_model.blocks:
+                    x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
                 if si == entry_num:
-                    x = target_next_token_map[:,sindex:pindex]
-                    print(f"x.shape: {x.shape}")
-                    print(f"draft_next_token_map.shape: {draft_next_token_map.shape}")
-                    print(f"same or not :{torch.equal(x,draft_next_token_map)}")
-                else:
-                    x = target_next_token_map
-                AdaLNSelfAttn.forward
-                if si >= entry_num:
-                    for b in self.target_model.blocks:
-                        x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
-                        if si == entry_num:
-                            print(f"x and last x{torch.equal(x,last_x)}")
-                target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
+                    print(f"x and last x: {torch.equal(x,last_x)}")
+            target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
 
             # 这里进行了改动，我们没有进行重新采样，因为实际上我们应该继续使用之前的f_hat,
             target_logits_BlV = (1+t) * target_logits_BlV[:B] - t * target_logits_BlV[B:]
