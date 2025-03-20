@@ -1149,17 +1149,15 @@ class SDVAR(nn.Module):
             if si != self.num_stages_minus_1:   # prepare for next stage
                 next_pn = self.patch_nums[si+1]
                 draft_next_token_map = draft_next_token_map.view(B, self.draft_model.Cvae, -1).transpose(1,2)
-                if si == entry_num - 1:
-                    print(f"len of draft_token_hub without block 0: {len_sum}")
-                len_sum += draft_next_token_map.shape[1]
                 draft_token_hub.append(draft_next_token_map)
-                if si == entry_num - 1:
-                    print(f"len of draft_token_hub without block 0: {len_sum}")
                 draft_next_token_map = (
                     self.draft_model.word_embed(draft_next_token_map)
                     + draft_lvl_pos[:, draft_cur_L : draft_cur_L + next_pn*next_pn]
                 )
                 draft_next_token_map = draft_next_token_map.repeat(2,1,1)
+                if si == entry_num - 1:
+                    for blk in self.draft_model.blocks:
+                        x = blk(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=None)
 
             if si == self.num_stages_minus_1:
                 for blk in self.draft_model.blocks:
@@ -1198,7 +1196,9 @@ class SDVAR(nn.Module):
             # 正常来说前边的已经进行过调整，所以这里应该只有最后一段需要cfg的修改。
             target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
             if len(target_next_token_map) != 0:
+                print(f"first_token_map.size:{target_first_token_map.shape}")
                 target_next_token_map = torch.cat([target_first_token_map,target_next_token_map],dim=1)
+
             else:
                 target_next_token_map = target_first_token_map
         else: 
