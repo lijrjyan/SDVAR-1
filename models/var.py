@@ -1117,7 +1117,7 @@ class SDVAR(nn.Module):
             print(f" x: {si} {x.shape}")
             # Get logits and apply CFG
             draft_logits_BlV = self.draft_model.get_logits(x, draft_cond_BD)            
-            print(f" x: {si} {draft_logits_BlV.shape}")
+            print(f" draft_logits_BLV: {si} {draft_logits_BlV.shape}")
             t = cfg * ratio
             draft_logits_BlV = (1+t)*draft_logits_BlV[:B] - t*draft_logits_BlV[B:]
             
