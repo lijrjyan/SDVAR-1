@@ -1100,6 +1100,7 @@ class SDVAR(nn.Module):
         draft_cur_L = 0
         draft_next_token_map = draft_first_token_map
         draft_token_hub = []
+        len_sum = 0
         
         for blk in self.draft_model.blocks:
             blk.attn.kv_caching(True)
@@ -1149,10 +1150,12 @@ class SDVAR(nn.Module):
                 next_pn = self.patch_nums[si+1]
                 draft_next_token_map = draft_next_token_map.view(B, self.draft_model.Cvae, -1).transpose(1,2)
                 if si == entry_num - 1:
-                    print(f"len of draft_token_hub without block 0: {len(draft_token_hub)}")
+                    print(f"len of draft_token_hub without block 0: {len_sum}")
+                len_sum += len(draft_next_token_map)
                 draft_token_hub.append(draft_next_token_map)
+                len_sum += len(draft_next_token_map)
                 if si == entry_num - 1:
-                    print(f"len of draft_token_hub without block 0: {len(draft_token_hub)}")
+                    print(f"len of draft_token_hub without block 0: {len_sum}")
                 draft_next_token_map = (
                     self.draft_model.word_embed(draft_next_token_map)
                     + draft_lvl_pos[:, draft_cur_L : draft_cur_L + next_pn*next_pn]
