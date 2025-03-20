@@ -1157,7 +1157,8 @@ class SDVAR(nn.Module):
                 draft_next_token_map = draft_next_token_map.repeat(2,1,1)
                 if si == entry_num - 1:
                     for blk in self.draft_model.blocks:
-                        x = blk(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=None)
+                        x = draft_next_token_map
+                        last_x = blk(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=None)
 
             if si == self.num_stages_minus_1:
                 for blk in self.draft_model.blocks:
@@ -1270,8 +1271,9 @@ class SDVAR(nn.Module):
                 AdaLNSelfAttn.forward
                 if si >= entry_num:
                     for b in self.target_model.blocks:
-                    # for b in self.draft_model.blocks:
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
+                        if si == entry_num:
+                            print(f"x and last x{torch.equal(x,last_x)}")
                 target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
 
             # 这里进行了改动，我们没有进行重新采样，因为实际上我们应该继续使用之前的f_hat,
