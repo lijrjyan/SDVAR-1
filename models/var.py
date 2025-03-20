@@ -1250,22 +1250,48 @@ class SDVAR(nn.Module):
                     print(f"Target logits shape: {target_logits_BlV.shape}")
                     print(f"Draft tokens shape: {draft_tokens_to_verify.shape}")
                     
-                    # 在这里，让我们简单地使用目标模型的token，跳过验证
-                    # 我们可以通过取target_logits_BlV的argmax来获取目标模型的token
-                    # 问题大概率出在这里 ？ 怎么验证 怎么获取
-                    #target_idx_Bl = torch.argmax(target_logits_BlV, dim=-1)
-                    #target_idx_Bl = target_top_idxs[:, :, 0]
-                    target_idx_Bl = sample_with_top_k_top_p_(
-                        target_logits_BlV,
-                        rng=self.rng,
-                        top_k=top_k,
-                        top_p=top_p,
-                        num_samples=1
-                    )[:, :, 0]
-                    print(f"Target idx shape: {target_idx_Bl.shape}")
-                    print("由于维度复杂性，跳过详细验证，直接使用target模型的预测")
+                    # 检查维度是否匹配
+                    if target_logits_BlV.size(0) == draft_tokens_to_verify.size(0) and target_logits_BlV.size(1) == draft_tokens_to_verify.size(1):
+                        # 维度匹配，可以进行验证
+                        # 计算目标模型的概率分布
+                        target_probs = torch.softmax(target_logits_BlV, dim=-1)
+                        
+                        # 获取目标模型的顶部预测
+                        target_top_idxs = torch.argmax(target_probs, dim=-1)
+                        
+                        # 计算验证掩码
+                        exact_match_mask = (target_top_idxs == draft_tokens_to_verify)
+                        
+                        # 计算目标模型给草稿模型预测的概率
+                        draft_prob_in_target = torch.gather(target_probs, -1, draft_tokens_to_verify.unsqueeze(-1)).squeeze(-1)
+                        prob_match_mask = (draft_prob_in_target > similarity_threshold)
+                        
+                        # 合并掩码
+                        verification_mask = exact_match_mask | prob_match_mask
+                        
+                        # 根据掩码选择保留草稿模型预测或使用目标模型预测
+                        verified_idx = torch.where(verification_mask, draft_tokens_to_verify, target_top_idxs)
+                        
+                        # 使用与原始代码相同的采样函数格式
+                        # 创建形状为 [B, L, 1] 的张量，然后取[:, :, 0]来匹配原始格式
+                        verified_idx_expanded = verified_idx.unsqueeze(-1)
+                        target_idx_Bl = verified_idx_expanded.expand(-1, -1, 1)[:, :, 0]
+                        
+                        # 打印统计信息
+                        acceptance_rate = verification_mask.float().mean().item() * 100
+                        print(f"验证完成: 接受了 {acceptance_rate:.2f}% 的草稿模型预测")
+                    else:
+                        # 维度不匹配，使用目标模型的采样结果
+                        print(f"维度不匹配，跳过验证，使用目标模型采样")
+                        target_idx_Bl = sample_with_top_k_top_p_(
+                            target_logits_BlV,
+                            rng=self.rng,
+                            top_k=top_k,
+                            top_p=top_p,
+                            num_samples=1
+                        )[:, :, 0]
                 else:
-                    # 如果没有要验证的token，直接使用标准采样
+                    # 没有草稿模型预测可验证，使用标准采样
                     target_idx_Bl = sample_with_top_k_top_p_(
                         target_logits_BlV,
                         rng=self.rng,
@@ -1273,7 +1299,6 @@ class SDVAR(nn.Module):
                         top_p=top_p,
                         num_samples=1
                     )[:, :, 0]
-            else:
                 # 对于后续阶段，使用标准生成
                 x = target_next_token_map
                 
