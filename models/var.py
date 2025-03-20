@@ -1248,37 +1248,51 @@ class SDVAR(nn.Module):
             # ======= SPECULATIVE VERIFICATION LOGIC START =======
             # Only apply verification at entry_num and if we have draft tokens to verify
             if si == entry_num and last_draft_idx_Bl is not None:
-                # Compute target model probabilities
-                target_probs = torch.softmax(target_logits_BlV, dim=-1)
-                
-                # Get top predictions from target model
-                target_top_idxs = torch.argmax(target_probs, dim=-1)
-                
-                # Create verification mask based on both exact matches and probability threshold
-                exact_match_mask = (target_top_idxs == last_draft_idx_Bl)
-                
-                # Also accept tokens where target assigns high probability to draft's prediction
-                draft_prob_in_target = torch.gather(target_probs, -1, last_draft_idx_Bl.unsqueeze(-1)).squeeze(-1)
-                prob_match_mask = (draft_prob_in_target > similarity_threshold)
-                
-                # Combine masks: accept if either exact match or high probability
-                verification_mask = exact_match_mask | prob_match_mask
-                
-                # Use verification mask to decide which tokens to keep
-                verified_idx_Bl = torch.where(
-                    verification_mask,
-                    last_draft_idx_Bl,    # Keep draft model tokens where verified
-                    target_top_idxs       # Use target model tokens where not verified
-                )
-                
-                # Report acceptance statistics
-                acceptance_rate = verification_mask.float().mean().item() * 100
-                print(f"Verification at stage {entry_num}: Accepted {acceptance_rate:.2f}% of draft tokens")
-                
-                # Use the verified tokens for generation
-                target_idx_Bl = verified_idx_Bl
+                # 注意：比较前需要确保维度匹配
+                # 检查维度是否匹配
+                if target_logits_BlV.size(1) != last_draft_idx_Bl.size(1):
+                    print(f"维度不匹配: target_logits_BlV.size(1)={target_logits_BlV.size(1)}, last_draft_idx_Bl.size(1)={last_draft_idx_Bl.size(1)}")
+                    # 在维度不匹配的情况下，直接使用target模型的输出
+                    target_idx_Bl = sample_with_top_k_top_p_(
+                        target_logits_BlV,
+                        rng=self.rng,
+                        top_k=top_k,
+                        top_p=top_p,
+                        num_samples=1
+                    )[:, :, 0]
+                    print("由于维度不匹配，跳过验证步骤，直接使用target模型的输出")
+                else:
+                    # 计算target模型的概率分布
+                    target_probs = torch.softmax(target_logits_BlV, dim=-1)
+                    
+                    # 获取target模型的top预测
+                    target_top_idxs = torch.argmax(target_probs, dim=-1)
+                    
+                    # 创建基于精确匹配和概率阈值的验证掩码
+                    exact_match_mask = (target_top_idxs == last_draft_idx_Bl)
+                    
+                    # 同时接受target模型为draft预测分配高概率的token
+                    draft_prob_in_target = torch.gather(target_probs, -1, last_draft_idx_Bl.unsqueeze(-1)).squeeze(-1)
+                    prob_match_mask = (draft_prob_in_target > similarity_threshold)
+                    
+                    # 合并掩码：精确匹配或高概率都接受
+                    verification_mask = exact_match_mask | prob_match_mask
+                    
+                    # 使用验证掩码决定保留哪些token
+                    verified_idx_Bl = torch.where(
+                        verification_mask,
+                        last_draft_idx_Bl,    # 保留已验证的draft模型token
+                        target_top_idxs       # 使用target模型token替换未验证的token
+                    )
+                    
+                    # 报告接受率统计
+                    acceptance_rate = verification_mask.float().mean().item() * 100
+                    print(f"验证阶段 {entry_num}: 接受了 {acceptance_rate:.2f}% 的draft模型token")
+                    
+                    # 使用验证后的token进行生成
+                    target_idx_Bl = verified_idx_Bl
             else:
-                # Normal sampling for other stages
+                # 其他阶段的正常采样
                 target_idx_Bl = sample_with_top_k_top_p_(
                     target_logits_BlV,
                     rng=self.rng,
