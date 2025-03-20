@@ -1252,7 +1252,16 @@ class SDVAR(nn.Module):
                     
                     # 在这里，让我们简单地使用目标模型的token，跳过验证
                     # 我们可以通过取target_logits_BlV的argmax来获取目标模型的token
-                    target_idx_Bl = torch.argmax(target_logits_BlV, dim=-1)
+                    # 问题大概率出在这里 ？ 怎么验证 怎么获取
+                    #target_idx_Bl = torch.argmax(target_logits_BlV, dim=-1)
+                    #target_idx_Bl = target_top_idxs[:, :, 0]
+                    target_idx_Bl = sample_with_top_k_top_p_(
+                        target_logits_BlV,
+                        rng=self.rng,
+                        top_k=top_k,
+                        top_p=top_p,
+                        num_samples=1
+                    )[:, :, 0]
                     print(f"Target idx shape: {target_idx_Bl.shape}")
                     print("由于维度复杂性，跳过详细验证，直接使用target模型的预测")
                 else:
