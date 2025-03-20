@@ -1157,8 +1157,6 @@ class SDVAR(nn.Module):
                 if( si == entry_num - 1):
                     print(f"start_points:{draft_cur_L-1}")
                     print(f"exit_points:{draft_cur_L + next_pn * next_pn-1}")
-                    print(f"sindex:{sindex}")
-                    print(f"pindex:{pindex}")
 
             if si == self.num_stages_minus_1:
                 for blk in self.draft_model.blocks:
@@ -1178,6 +1176,8 @@ class SDVAR(nn.Module):
         pindex = exit_points[entry_num]
         sindex = start_points[entry_num]
         device = torch.device("cuda:0")
+        print(f"sindex:{sindex}")
+        print(f"pindex:{pindex}")
 
 
         target_sos, target_cond_BD, target_cond_BD_or_gss, \
