@@ -569,19 +569,19 @@ class SDVAR(nn.Module):
                     # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
                     attn_bias = self.attn_bias_for_sdmasking[:,:,0:pindex,0:pindex]
                     attn_bias = attn_bias.to(device)
-                if sd_mask == 2:
+                elif sd_mask == 2:
                     # sd_mask = 2, 全部层不包括未预测这层进行block-wise的掩码
                     attn_bias = self.attn_bias_for_sdmasking[:, :, 0:pindex, 0:pindex].clone()
                     attn_bias[:, :, sindex:pindex, :] = 0.0
                     attn_bias = attn_bias.to(device)
-                if sd_mask == 3:
+                elif sd_mask == 3:
                     # sd_mask = 3, 进行因果掩码
                     attn_bias = self.target_model.attn_bias_for_masking[:,:,0:pindex,0:pindex]
-                if sd_mask == 4: 
+                elif sd_mask == 4: 
                     # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
                     attn_bias = self.attn_bias_for_block[:,:,0:pindex,0:pindex]
                     attn_bias = attn_bias.to(device)
-                if sd_mask == 5:
+                elif sd_mask == 5:
                     # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
                     attn_bias = self.attn_bias_for_block[:, :, 0:pindex, 0:pindex].clone()
                     attn_bias[:, :, sindex:pindex, :] = 0.0
