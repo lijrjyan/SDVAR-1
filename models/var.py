@@ -598,7 +598,7 @@ class SDVAR(nn.Module):
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=attn_bias)
                 else:
                     # for b in self.target_model.blocks:
-                    for blk in self.draft_model.blocks:
+                    for b in self.draft_model.blocks:
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
 
                 if si == entry_num:
@@ -616,7 +616,7 @@ class SDVAR(nn.Module):
                     x = target_next_token_map
                 AdaLNSelfAttn.forward
                 if si >= entry_num:
-                    for blk in self.draft_model.blocks:
+                    for b in self.draft_model.blocks:
                     # for b in self.target_model.blocks:
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
                 target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
