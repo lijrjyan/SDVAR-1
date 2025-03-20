@@ -1157,6 +1157,8 @@ class SDVAR(nn.Module):
                 if( si == entry_num - 1):
                     print(f"start_points:{draft_cur_L-1}")
                     print(f"exit_points:{draft_cur_L + next_pn * next_pn-1}")
+                    print(f"sindex:{sindex}")
+                    print(f"pindex:{pindex}")
 
             if si == self.num_stages_minus_1:
                 for blk in self.draft_model.blocks:
