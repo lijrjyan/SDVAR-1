@@ -1259,7 +1259,7 @@ class SDVAR(nn.Module):
                 if si == entry_num:
                     x = target_next_token_map[:,sindex:pindex]
                     print(f"x.shape: {x.shape}")
-                    print(f"draft_next_token_map.shape: {draft_next_token_map}")
+                    print(f"draft_next_token_map.shape: {draft_next_token_map.shape}")
                     print(f"same or not :{torch.equal(x,draft_next_token_map)}")
                 else:
                     x = target_next_token_map
