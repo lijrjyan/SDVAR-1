@@ -1173,6 +1173,9 @@ class SDVAR(nn.Module):
         pindex = exit_points[entry_num]
         sindex = start_points[entry_num]
         device = torch.device("cuda:0")
+        print(f"sindex:{sindex}")
+        print(f"pindex:{pindex}")
+
 
         target_sos, target_cond_BD, target_cond_BD_or_gss, \
         target_lvl_pos, target_first_token_map, target_f_hat = self.init_param(self.target_model, B, label_B)
@@ -1254,7 +1257,7 @@ class SDVAR(nn.Module):
             else:
                 # sd_mask = 0, 不需要使用掩码
                 if si == entry_num:
-                    x = target_next_token_map[:,sindex:pindex,-1]
+                    x = target_next_token_map[:,sindex:pindex]
                     print(f"same or not :{torch.equal(x,draft_next_token_map)}")
                 else:
                     x = target_next_token_map
@@ -1300,8 +1303,8 @@ class SDVAR(nn.Module):
                 target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
             
         # target模型生成完成
-        # for blk in self.draft_model.blocks:
-        for blk in self.target_model.blocks:
+        for blk in self.draft_model.blocks:
+        # for blk in self.target_model.blocks:
             blk.attn.kv_caching(False)   
                     
         return self.vae_proxy[0].fhat_to_img(target_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
