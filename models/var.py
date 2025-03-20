@@ -360,8 +360,15 @@ class SDVAR(nn.Module):
                 attn_bias_for_sdmasking[i, j] = 0.0
 
         attn_bias_for_sdmasking = attn_bias_for_sdmasking.reshape(1, 1, total_tokens, total_tokens)
-        
         self.attn_bias_for_sdmasking = attn_bias_for_sdmasking
+
+        for i in range(total_tokens):
+            for j in range(total_tokens):
+                if block_ids[i] == block_ids[j]:  # 只允许相同 block_id 之间互相注意
+                    blockmasking[i, j] = 0.0
+
+        blockmasking = blockmasking.reshape(1, 1, total_tokens, total_tokens)
+        self.attn_bias_for_block = blockmasking
 
     def init_param(
             self,
@@ -569,6 +576,15 @@ class SDVAR(nn.Module):
                 if sd_mask == 3:
                     # sd_mask = 3, 进行因果掩码
                     attn_bias = self.target_model.attn_bias_for_masking[:,:,0:pindex,0:pindex]
+                if sd_mask == 4: 
+                    # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
+                    attn_bias = self.attn_bias_for_block[:,:,0:pindex,0:pindex]
+                    attn_bias = attn_bias.to(device)
+                if sd_mask == 4:
+                    # sd_mask = 1, 全部层包括未预测这层进行block-wise的掩码
+                    attn_bias = self.attn_bias_for_block[:, :, 0:pindex, 0:pindex].clone()
+                    attn_bias[:, :, sindex:pindex, :] = 0.0
+                    attn_bias = attn_bias.to(device)
 
                 x = target_next_token_map
                 AdaLNSelfAttn.forward
