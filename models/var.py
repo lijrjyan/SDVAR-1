@@ -1114,8 +1114,10 @@ class SDVAR(nn.Module):
             for blk in self.draft_model.blocks:
                 x = blk(x=x, cond_BD=draft_cond_BD_or_gss, attn_bias=None)
             
+            print(f" x: {si} {x.shape}")
             # Get logits and apply CFG
             draft_logits_BlV = self.draft_model.get_logits(x, draft_cond_BD)            
+            print(f" x: {si} {draft_logits_BlV.shape}")
             t = cfg * ratio
             draft_logits_BlV = (1+t)*draft_logits_BlV[:B] - t*draft_logits_BlV[B:]
             
