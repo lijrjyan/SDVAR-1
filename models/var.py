@@ -509,6 +509,9 @@ class SDVAR(nn.Module):
                     + draft_lvl_pos[:, draft_cur_L : draft_cur_L + next_pn*next_pn]
                 )
                 draft_next_token_map = draft_next_token_map.repeat(2,1,1)
+                if( si == entry_num - 1):
+                    print(f"start_points:{draft_cur_L}")
+                    print(f"exit_points:{draft_cur_L + next_pn * next_pn}")
 
             if si == self.num_stages_minus_1:
                 for blk in self.draft_model.blocks:
@@ -593,12 +596,10 @@ class SDVAR(nn.Module):
                 AdaLNSelfAttn.forward
                 # 这里我们暂时不检测也不用attn_bias，因为我们当前只截取了进入层的
                 if si == entry_num:
-                    # for b in self.target_model.blocks:
-                    for blk in self.draft_model.blocks:
+                    for b in self.target_model.blocks:
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=attn_bias)
                 else:
-                    # for b in self.target_model.blocks:
-                    for b in self.draft_model.blocks:
+                    for b in self.target_model.blocks:
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
 
                 if si == entry_num:
@@ -616,8 +617,7 @@ class SDVAR(nn.Module):
                     x = target_next_token_map
                 AdaLNSelfAttn.forward
                 if si >= entry_num:
-                    for b in self.draft_model.blocks:
-                    # for b in self.target_model.blocks:
+                    for b in self.target_model.blocks:
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
                 target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
 
