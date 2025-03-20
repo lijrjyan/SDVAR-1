@@ -1151,7 +1151,7 @@ class SDVAR(nn.Module):
                 draft_next_token_map = draft_next_token_map.view(B, self.draft_model.Cvae, -1).transpose(1,2)
                 if si == entry_num - 1:
                     print(f"len of draft_token_hub without block 0: {len_sum}")
-                len_sum += len(draft_next_token_map)
+                len_sum += draft_next_token_map.shape[1]
                 draft_token_hub.append(draft_next_token_map)
                 if si == entry_num - 1:
                     print(f"len of draft_token_hub without block 0: {len_sum}")
