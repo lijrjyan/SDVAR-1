@@ -1149,6 +1149,8 @@ class SDVAR(nn.Module):
                 next_pn = self.patch_nums[si+1]
                 draft_next_token_map = draft_next_token_map.view(B, self.draft_model.Cvae, -1).transpose(1,2)
                 draft_token_hub.append(draft_next_token_map)
+                if si == entry_num - 1:
+                    print(draft_next_token_map.shape)
                 draft_next_token_map = (
                     self.draft_model.word_embed(draft_next_token_map)
                     + draft_lvl_pos[:, draft_cur_L : draft_cur_L + next_pn*next_pn]
@@ -1193,7 +1195,6 @@ class SDVAR(nn.Module):
             target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
             if len(target_next_token_map) != 0:
                 target_next_token_map = torch.cat([target_first_token_map,target_next_token_map],dim=1)
-                print(target_next_token_map.shape)
             else:
                 target_next_token_map = target_first_token_map
         else: 
@@ -1257,6 +1258,7 @@ class SDVAR(nn.Module):
                 # sd_mask = 0, 不需要使用掩码
                 if si == entry_num:
                     x = target_next_token_map[:,sindex:pindex]
+                    print(x.shape)
                     print(f"same or not :{torch.equal(x,draft_next_token_map)}")
                 else:
                     x = target_next_token_map
