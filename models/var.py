@@ -1148,13 +1148,15 @@ class SDVAR(nn.Module):
             if si != self.num_stages_minus_1:   # prepare for next stage
                 next_pn = self.patch_nums[si+1]
                 draft_next_token_map = draft_next_token_map.view(B, self.draft_model.Cvae, -1).transpose(1,2)
+                if si == entry_num - 1:
+                    print(f"len of draft_token_hub without block 0: {len(draft_token_hub)}")
                 draft_token_hub.append(draft_next_token_map)
+                if si == entry_num - 1:
+                    print(f"len of draft_token_hub without block 0: {len(draft_token_hub)}")
                 draft_next_token_map = (
                     self.draft_model.word_embed(draft_next_token_map)
                     + draft_lvl_pos[:, draft_cur_L : draft_cur_L + next_pn*next_pn]
                 )
-                if si == entry_num - 1:
-                    print(draft_next_token_map.shape)
                 draft_next_token_map = draft_next_token_map.repeat(2,1,1)
 
             if si == self.num_stages_minus_1:
