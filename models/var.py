@@ -510,8 +510,8 @@ class SDVAR(nn.Module):
                 )
                 draft_next_token_map = draft_next_token_map.repeat(2,1,1)
                 if( si == entry_num - 1):
-                    print(f"start_points:{draft_cur_L}")
-                    print(f"exit_points:{draft_cur_L + next_pn * next_pn}")
+                    print(f"start_points:{draft_cur_L-1}")
+                    print(f"exit_points:{draft_cur_L + next_pn * next_pn-1}")
 
             if si == self.num_stages_minus_1:
                 for blk in self.draft_model.blocks:
@@ -596,10 +596,12 @@ class SDVAR(nn.Module):
                 AdaLNSelfAttn.forward
                 # 这里我们暂时不检测也不用attn_bias，因为我们当前只截取了进入层的
                 if si == entry_num:
-                    for b in self.target_model.blocks:
+                    # for b in self.target_model.blocks:
+                    for b in self.draft_model.blocks:
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=attn_bias)
                 else:
-                    for b in self.target_model.blocks:
+                    # for b in self.target_model.blocks:
+                    for b in self.draft_model.blocks:
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
 
                 if si == entry_num:
@@ -617,7 +619,8 @@ class SDVAR(nn.Module):
                     x = target_next_token_map
                 AdaLNSelfAttn.forward
                 if si >= entry_num:
-                    for b in self.target_model.blocks:
+                    # for b in self.target_model.blocks:
+                    for b in self.draft_model.blocks:
                         x = b(x=x, cond_BD=target_cond_BD_or_gss, attn_bias=None)
                 target_logits_BlV = self.target_model.get_logits(x, target_cond_BD)
 
@@ -656,7 +659,8 @@ class SDVAR(nn.Module):
                 target_next_token_map = target_next_token_map.repeat(2, 1, 1)   # double the batch sizes due to CFG
             
         # target模型生成完成
-        for blk in self.target_model.blocks:
+        for blk in self.draft_model.blocks:
+        # for blk in self.target_model.blocks:
             blk.attn.kv_caching(False)   
                     
         return self.vae_proxy[0].fhat_to_img(target_f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
